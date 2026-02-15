@@ -10,23 +10,8 @@ env:
   GO_VERSION: "1.17.9"
 
 jobs:
-  runner-selector:
-    uses: orcasecurity/ghrw-runner-selector/.github/workflows/runner-selector.yaml@v1
-    secrets: inherit
-    with:
-      cpu: 2
-      memory: 4
-
   build-and-release:
-    needs: runner-selector
-    runs-on: ${{ needs.runner-selector.outputs.runs-on }}
-    container:
-      image: 552936520451.dkr.ecr.us-east-1.amazonaws.com/orca/orca-github-workflow-images/base:1.2
-      credentials:
-        username: AWS
-        password: ${{ secrets.ECR_TOKEN }}
-      env: ${{ fromJson(needs.runner-selector.outputs.container-environment) }}
-      volumes: ${{ fromJson(needs.runner-selector.outputs.container-volumes) }}
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
