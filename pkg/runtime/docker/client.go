@@ -41,7 +41,7 @@ var _ runtime.Interface = &dockerClient{}
 
 // GetDockerClient builds a client for talking to docker
 func GetDockerClient() (*dockerClient, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithVersion("1.35"))
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithVersion("1.44"))
 	if err != nil {
 		return nil, err
 	}
