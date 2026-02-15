@@ -1,0 +1,79 @@
+# Creates a GitHub release on every push to main with multi-arch binaries + source.
+name: Release on main
+
+on:
+  push:
+    branches: [main]
+
+env:
+  DOCKER_TTY: ""  # avoid docker TTY issues in CI
+  GO_VERSION: "1.17.9"
+
+jobs:
+  runner-selector:
+    uses: orcasecurity/ghrw-runner-selector/.github/workflows/runner-selector.yaml@v1
+    secrets: inherit
+    with:
+      cpu: 2
+      memory: 4
+
+  build-and-release:
+    needs: runner-selector
+    runs-on: ${{ needs.runner-selector.outputs.runs-on }}
+    container:
+      image: 552936520451.dkr.ecr.us-east-1.amazonaws.com/orca/orca-github-workflow-images/base:1.2
+      credentials:
+        username: AWS
+        password: ${{ secrets.ECR_TOKEN }}
+      env: ${{ fromJson(needs.runner-selector.outputs.container-environment) }}
+      volumes: ${{ fromJson(needs.runner-selector.outputs.container-volumes) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set short SHA
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Set version
+        run: |
+          VERSION=$(cat VERSION | tr -d '\n')
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "VERSION_TAG=v${VERSION}" >> $GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Build binaries for both arches (explicit targets to skip Docker image build)
+      - name: Build amd64 binaries
+        run: |
+          make go-make TARGETS="bin/amd64/ignite bin/amd64/ignited bin/amd64/ignite-spawn" GOARCH=amd64 GO_MAKE_TARGET=local
+
+      - name: Build arm64 binaries
+        run: |
+          make go-make TARGETS="bin/arm64/ignite bin/arm64/ignited bin/arm64/ignite-spawn" GOARCH=arm64 GO_MAKE_TARGET=local
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          cp bin/amd64/ignite    release/ignite-amd64
+          cp bin/amd64/ignited   release/ignited-amd64
+          cp bin/amd64/ignite-spawn release/ignite-spawn-amd64
+          cp bin/arm64/ignite    release/ignite-arm64
+          cp bin/arm64/ignited   release/ignited-arm64
+          cp bin/arm64/ignite-spawn release/ignite-spawn-arm64
+          git archive --format=zip --prefix=ignite/ -o release/source.zip HEAD
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: release-${{ env.SHORT_SHA }}
+          name: ${{ env.VERSION_TAG }} (${{ env.SHORT_SHA }})
+          body: "Auto-release from main branch."
+          files: release/*
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
