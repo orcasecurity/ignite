@@ -20,12 +20,23 @@ import (
 
 const (
 	blockSize       = 4096   // Block size to use for the ext4 filesystems, this is the default
-	// minimumBaseSizeBytes: floor for base image so large images (full distro + kernel source) fit.
-	// OCI image "size" is often compressed or layer size; extracted content can be much larger.
-	// Full distros (e.g. Amazon Linux 2023 with kernel source) can need 15GB+.
-	minimumBaseSizeBytes    = 15 * 1024 * 1024 * 1024 // 15 GB
-	baseImageSizeMultiplier = 5                       // multiplier over OCI size (extraction + fs overhead)
+	// defaultMinimumBaseSizeGB is the default floor (in GB) for the base image when IGNITE_BASE_IMAGE_MIN_SIZE_GB is unset.
+	defaultMinimumBaseSizeGB = 10
+	baseImageSizeMultiplier  = 5 // multiplier over OCI size (extraction + fs overhead)
 )
+
+// env var to override minimum base image size (in GB). E.g. IGNITE_BASE_IMAGE_MIN_SIZE_GB=15 for huge images.
+const minimumBaseSizeGBEnv = "IGNITE_BASE_IMAGE_MIN_SIZE_GB"
+
+func getMinimumBaseSizeBytes() int64 {
+	gb := defaultMinimumBaseSizeGB
+	if s := os.Getenv(minimumBaseSizeGBEnv); s != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n >= 1 && n <= 100 {
+			gb = n
+		}
+	}
+	return int64(gb) * 1024 * 1024 * 1024
+}
 
 // CreateImageFilesystem creates an ext4 filesystem in a file, containing the files from the source
 func CreateImageFilesystem(img *api.Image, src source.Source) error {
@@ -41,12 +52,13 @@ func CreateImageFilesystem(img *api.Image, src source.Source) error {
 
 	// To accommodate space for the tar contents and the ext4 journal + metadata,
 	// make the base image a sparse file. OCI image "size" is often compressed/layer size;
-	// extracted content can be much larger, so we use a multiplier and a generous minimum.
+	// extracted content can be much larger, so we use a multiplier and a minimum (default 10 GB, overridable via IGNITE_BASE_IMAGE_MIN_SIZE_GB).
 	// The file will be shrunk by resizeToMinimum later.
+	minimumBaseSizeBytes := getMinimumBaseSizeBytes()
 	computedSize := int64(img.Status.OCISource.Size.Bytes()) * int64(baseImageSizeMultiplier)
 	baseImageSize := computedSize
-	if baseImageSize < int64(minimumBaseSizeBytes) {
-		baseImageSize = int64(minimumBaseSizeBytes)
+	if baseImageSize < minimumBaseSizeBytes {
+		baseImageSize = minimumBaseSizeBytes
 	}
 
 	if err := imageFile.Truncate(baseImageSize); err != nil {

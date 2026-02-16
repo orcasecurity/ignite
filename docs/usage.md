@@ -116,6 +116,19 @@ In this list, the protocol is completely ignored, because it's specified by the 
 IGNITE_CONTAINERD_INSECURE_REGISTRIES="localhost:5000,localhost:5001,example.com,http://example.com"
 ```
 
+**Image import base size:** When importing an image, Ignite allocates a base filesystem to extract the image contents into. The minimum size (in GB) can be set with the `IGNITE_BASE_IMAGE_MIN_SIZE_GB` environment variable (default: 10, allowed range: 1–100). Use a larger value for very large images (e.g. full distros with kernel source); use a smaller value when host disk is limited (e.g. CI runners with little free space).
+
+```shell
+# Default (10 GB)
+ignite image import myimage
+
+# Large image, plenty of disk
+IGNITE_BASE_IMAGE_MIN_SIZE_GB=15 ignite image import myimage
+
+# Small image or limited host disk
+IGNITE_BASE_IMAGE_MIN_SIZE_GB=5 ignite image import myimage
+```
+
 [json-key]: https://cloud.google.com/container-registry/docs/advanced-authentication#json-key
 [credential-helpers]: https://docs.docker.com/engine/reference/commandline/login/#credential-helpers
 
