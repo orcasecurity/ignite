@@ -1,9 +1,12 @@
 package source
 
 import (
+	"bytes"
+	"fmt"
 	"os/exec"
 
 	containerderr "github.com/containerd/containerd/errdefs"
+	log "github.com/sirupsen/logrus"
 )
 
 // TarExtract extracts all files from a source to a directory
@@ -16,13 +19,19 @@ func TarExtract(src Source, dir string, args ...string) error {
 	}
 	defer reader.Close()
 
+	var stderr bytes.Buffer
 	tarCmd.Stdin = reader
+	tarCmd.Stderr = &stderr
 	if err := tarCmd.Start(); err != nil {
 		return err
 	}
 
 	if err := tarCmd.Wait(); err != nil {
-		return err
+		if stderr.Len() > 0 {
+			log.Errorf("TarExtract: tar stderr: %s", stderr.String())
+			return fmt.Errorf("tar extract failed (stderr: %s): %v", bytes.TrimSpace(stderr.Bytes()), err)
+		}
+		return fmt.Errorf("tar extract failed: %v", err)
 	}
 
 	if err = src.Cleanup(); err != nil {
