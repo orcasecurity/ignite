@@ -55,6 +55,8 @@ func CreateImageFilesystem(img *api.Image, src source.Source) error {
 	// extracted content can be much larger, so we use a multiplier and a minimum (default 10 GB, overridable via IGNITE_BASE_IMAGE_MIN_SIZE_GB).
 	// The file will be shrunk by resizeToMinimum later.
 	minimumBaseSizeBytes := getMinimumBaseSizeBytes()
+	minimumBaseSizeGB := minimumBaseSizeBytes / (1024 * 1024 * 1024)
+	log.Infof("image import: minimum base image size %d GB (override with IGNITE_BASE_IMAGE_MIN_SIZE_GB)", minimumBaseSizeGB)
 	computedSize := int64(img.Status.OCISource.Size.Bytes()) * int64(baseImageSizeMultiplier)
 	baseImageSize := computedSize
 	if baseImageSize < minimumBaseSizeBytes {
