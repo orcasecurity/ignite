@@ -20,7 +20,11 @@ import (
 
 const (
 	blockSize       = 4096   // Block size to use for the ext4 filesystems, this is the default
-	minimumBaseSize = 500000 // Mimimum size of the base image, ~ half a megabyte.
+	// minimumBaseSizeBytes: floor for base image so large images (full distro + kernel source) fit.
+	// OCI image "size" is often compressed or layer size; extracted content can be much larger.
+	// Full distros (e.g. Amazon Linux 2023 with kernel source) can need 15GB+.
+	minimumBaseSizeBytes    = 15 * 1024 * 1024 * 1024 // 15 GB
+	baseImageSizeMultiplier = 5                       // multiplier over OCI size (extraction + fs overhead)
 )
 
 // CreateImageFilesystem creates an ext4 filesystem in a file, containing the files from the source
@@ -35,18 +39,14 @@ func CreateImageFilesystem(img *api.Image, src source.Source) error {
 	}
 	defer imageFile.Close()
 
-	// To accommodate space for the tar file contents and the ext4 journal + other metadata,
-	// make the base image a sparse file three times the size of the source contents. This
-	// will be shrunk to fit by resizeToMinimum later.
-	var baseImageSize int64
-	threeTimesImageSize := img.Status.OCISource.Size.Bytes() * 3
-	// If the base image is too small, filesystem creation using mkfs fails with
-	// not enough space error. Ensure the base image size is at least the
-	// minimum base size.
-	if threeTimesImageSize < minimumBaseSize {
-		baseImageSize = int64(minimumBaseSize)
-	} else {
-		baseImageSize = int64(threeTimesImageSize)
+	// To accommodate space for the tar contents and the ext4 journal + metadata,
+	// make the base image a sparse file. OCI image "size" is often compressed/layer size;
+	// extracted content can be much larger, so we use a multiplier and a generous minimum.
+	// The file will be shrunk by resizeToMinimum later.
+	computedSize := int64(img.Status.OCISource.Size.Bytes()) * int64(baseImageSizeMultiplier)
+	baseImageSize := computedSize
+	if baseImageSize < int64(minimumBaseSizeBytes) {
+		baseImageSize = int64(minimumBaseSizeBytes)
 	}
 
 	if err := imageFile.Truncate(baseImageSize); err != nil {
