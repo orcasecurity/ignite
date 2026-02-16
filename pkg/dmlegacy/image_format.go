@@ -29,7 +29,9 @@ func CreateImageFilesystem(img *api.Image, src source.Source) error {
 	p := path.Join(img.ObjectPath(), constants.IMAGE_FS)
 	imageFile, err := os.Create(p)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create image file for %s", img.GetUID())
+		errMsg := errors.Wrapf(err, "failed to create image file for %s", img.GetUID())
+		log.Errorf("image import: %v", errMsg)
+		return errMsg
 	}
 	defer imageFile.Close()
 
@@ -48,23 +50,32 @@ func CreateImageFilesystem(img *api.Image, src source.Source) error {
 	}
 
 	if err := imageFile.Truncate(baseImageSize); err != nil {
-		return errors.Wrapf(err, "failed to allocate space for image %s", img.GetUID())
+		errMsg := errors.Wrapf(err, "failed to allocate space for image %s", img.GetUID())
+		log.Errorf("image import: %v", errMsg)
+		return errMsg
 	}
 
 	// Use mkfs.ext4 to create the new image with an inode size of 256
 	// (gexto doesn't support anything but 128, but as long as we're not using that it's fine)
 	if _, err := util.ExecuteCommand("mkfs.ext4", "-b", strconv.Itoa(blockSize),
 		"-I", "256", "-F", "-E", "lazy_itable_init=0,lazy_journal_init=0", p); err != nil {
-		return errors.Wrapf(err, "failed to format image %s", img.GetUID())
+		errMsg := errors.Wrapf(err, "failed to format image %s", img.GetUID())
+		log.Errorf("image import mkfs.ext4 failed: %v", errMsg)
+		return errMsg
 	}
 
 	// Proceed with populating the image with files
 	if err := addFiles(img, src); err != nil {
+		log.Errorf("image import addFiles failed: %v", err)
 		return err
 	}
 
 	// Resize the image to its minimum size
-	return resizeToMinimum(img)
+	if err := resizeToMinimum(img); err != nil {
+		log.Errorf("image import resizeToMinimum failed: %v", err)
+		return err
+	}
+	return nil
 }
 
 // addFiles copies the contents of the tar file into the ext4 filesystem
@@ -78,7 +89,9 @@ func addFiles(img *api.Image, src source.Source) (err error) {
 	defer os.RemoveAll(tempDir)
 
 	if _, err := util.ExecuteCommand("mount", "-o", "loop", p, tempDir); err != nil {
-		return fmt.Errorf("failed to mount image %q: %v", p, err)
+		errMsg := fmt.Errorf("failed to mount image %q: %v", p, err)
+		log.Errorf("image import mount failed: %v", errMsg)
+		return errMsg
 	}
 	defer util.DeferErr(&err, func() error {
 		_, execErr := util.ExecuteCommand("umount", tempDir)
@@ -87,10 +100,14 @@ func addFiles(img *api.Image, src source.Source) (err error) {
 
 	err = source.TarExtract(src, tempDir)
 	if err != nil {
+		log.Errorf("image import TarExtract failed: %v", err)
 		return
 	}
 
 	err = setupResolvConf(tempDir)
+	if err != nil {
+		log.Errorf("image import setupResolvConf failed: %v", err)
+	}
 
 	return
 }
@@ -126,10 +143,12 @@ func resizeToMinimum(img *api.Image) (err error) {
 	var imageFile *os.File
 
 	if minSize, err = getMinSize(p); err != nil {
+		log.Errorf("image import getMinSize failed: %v", err)
 		return
 	}
 
 	if imageFile, err = os.OpenFile(p, os.O_RDWR, constants.DATA_DIR_FILE_PERM); err != nil {
+		log.Errorf("image import OpenFile failed: %v", err)
 		return
 	}
 	defer util.DeferErr(&err, imageFile.Close)
@@ -139,6 +158,7 @@ func resizeToMinimum(img *api.Image) (err error) {
 	log.Debugf("Truncating %q to %d bytes", p, minSizeBytes)
 	if err = imageFile.Truncate(minSizeBytes); err != nil {
 		err = fmt.Errorf("failed to shrink image %q: %v", img.GetUID(), err)
+		log.Errorf("image import truncate failed: %v", err)
 	}
 
 	return
@@ -150,6 +170,7 @@ func getMinSize(p string) (minSize int64, err error) {
 	// Loop mount the image for resize2fs
 	imageLoop, err := newLoopDev(p, false)
 	if err != nil {
+		log.Errorf("image import newLoopDev failed: %v", err)
 		return
 	}
 
@@ -164,10 +185,12 @@ func getMinSize(p string) (minSize int64, err error) {
 	log.Debugf("Retrieving minimum size for %q", imageLoop.Path())
 	out, err := util.ExecuteCommand("resize2fs", "-P", imageLoop.Path())
 	if err != nil {
+		log.Errorf("image import resize2fs -P failed: %v", err)
 		return
 	}
 
 	if minSize, err = parseResize2fsOutputForMinSize(out); err != nil {
+		log.Errorf("image import parseResize2fs output failed: %v", err)
 		return
 	}
 
@@ -175,6 +198,9 @@ func getMinSize(p string) (minSize int64, err error) {
 
 	// Perform the filesystem resize
 	_, err = util.ExecuteCommand("resize2fs", imageLoop.Path(), strconv.FormatInt(minSize, 10))
+	if err != nil {
+		log.Errorf("image import resize2fs shrink failed: %v", err)
+	}
 	return
 }
 

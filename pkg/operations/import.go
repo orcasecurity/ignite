@@ -46,6 +46,7 @@ func importImage(c *client.Client, ociRef meta.OCIImageRef) (*api.Image, error) 
 	dockerSource := source.NewDockerSource()
 	src, err := dockerSource.Parse(ociRef)
 	if err != nil {
+		log.Errorf("image import: parse OCI ref failed: %v", err)
 		return nil, err
 	}
 
@@ -59,6 +60,7 @@ func importImage(c *client.Client, ociRef meta.OCIImageRef) (*api.Image, error) 
 
 	// Generate UID automatically
 	if err := metadata.SetNameAndUID(image, c); err != nil {
+		log.Errorf("image import: SetNameAndUID failed: %v", err)
 		return nil, err
 	}
 
@@ -66,10 +68,12 @@ func importImage(c *client.Client, ociRef meta.OCIImageRef) (*api.Image, error) 
 
 	// Truncate a file for the filesystem, format it with ext4, and copy in the files from the source
 	if err := dmlegacy.CreateImageFilesystem(image, dockerSource); err != nil {
+		log.Errorf("image import: CreateImageFilesystem failed: %v", err)
 		return nil, err
 	}
 
 	if err := c.Images().Set(image); err != nil {
+		log.Errorf("image import: Images().Set failed: %v", err)
 		return nil, err
 	}
 
@@ -104,6 +108,7 @@ func importKernel(c *client.Client, ociRef meta.OCIImageRef) (*api.Kernel, error
 	dockerSource := source.NewDockerSource()
 	src, err := dockerSource.Parse(ociRef)
 	if err != nil {
+		log.Errorf("kernel import: parse OCI ref failed: %v", err)
 		return nil, err
 	}
 
@@ -117,6 +122,7 @@ func importKernel(c *client.Client, ociRef meta.OCIImageRef) (*api.Kernel, error
 
 	// Generate UID automatically
 	if err := metadata.SetNameAndUID(kernel, c); err != nil {
+		log.Errorf("kernel import: SetNameAndUID failed: %v", err)
 		return nil, err
 	}
 
@@ -135,24 +141,29 @@ func importKernel(c *client.Client, ociRef meta.OCIImageRef) (*api.Kernel, error
 		// the necessary files from the OCI image
 		tempDir, err := ioutil.TempDir("", "")
 		if err != nil {
+			log.Errorf("kernel import: TempDir failed: %v", err)
 			return nil, err
 		}
 
 		// Extract only the /boot and /lib directories of the tar stream into the tempDir
 		err = source.TarExtract(dockerSource, tempDir, "boot", "lib/modules")
 		if err != nil {
+			log.Errorf("kernel import: TarExtract failed: %v", err)
 			return nil, err
 		}
 
 		// Locate the kernel file in the temporary directory
 		kernelTmpFile, err := findKernel(tempDir)
 		if err != nil {
+			log.Errorf("kernel import: findKernel failed: %v", err)
 			return nil, err
 		}
 
 		// Copy the vmlinux file
 		if err := util.CopyFile(kernelTmpFile, vmlinuxFile); err != nil {
-			return nil, fmt.Errorf("failed to copy kernel file %q to kernel %q: %v", kernelTmpFile, kernel.GetUID(), err)
+			errMsg := fmt.Errorf("failed to copy kernel file %q to kernel %q: %v", kernelTmpFile, kernel.GetUID(), err)
+			log.Errorf("kernel import: %v", errMsg)
+			return nil, errMsg
 		}
 
 		// Locate the initrd file in the temporary directory
@@ -162,7 +173,9 @@ func importKernel(c *client.Client, ociRef meta.OCIImageRef) (*api.Kernel, error
 			kernel.Spec.HasInitrd = true
 			// Copy the initrd file
 			if err := util.CopyFile(initrdTmpFile, initrdFile); err != nil {
-				return nil, fmt.Errorf("failed to copy initrd file %q to initrd %q: %v", initrdTmpFile, kernel.GetUID(), err)
+				errMsg := fmt.Errorf("failed to copy initrd file %q to initrd %q: %v", initrdTmpFile, kernel.GetUID(), err)
+				log.Errorf("kernel import: %v", errMsg)
+				return nil, errMsg
 			}
 		} else {
 			kernel.Spec.HasInitrd = false
@@ -170,11 +183,13 @@ func importKernel(c *client.Client, ociRef meta.OCIImageRef) (*api.Kernel, error
 
 		// Pack the kernel tar with unnecessary data removed
 		if _, err := util.ExecuteCommand("tar", "-cf", kernelTarFile, "-C", tempDir, "."); err != nil {
+			log.Errorf("kernel import: tar pack failed: %v", err)
 			return nil, err
 		}
 
 		// Cleanup
 		if err := os.RemoveAll(tempDir); err != nil {
+			log.Errorf("kernel import: RemoveAll tempDir failed: %v", err)
 			return nil, err
 		}
 	}
@@ -192,6 +207,7 @@ func importKernel(c *client.Client, ociRef meta.OCIImageRef) (*api.Kernel, error
 	}
 
 	if err := c.Kernels().Set(kernel); err != nil {
+		log.Errorf("kernel import: Kernels().Set failed: %v", err)
 		return nil, err
 	}
 
